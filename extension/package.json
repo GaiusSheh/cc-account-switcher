@@ -1,0 +1,51 @@
+{
+  "name": "cc-account-switcher",
+  "displayName": "Claude Code Account Switcher",
+  "description": "Switch between multiple Claude Code accounts without browser re-authentication",
+  "version": "0.1.0",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "cc-switcher.switchAccount",
+        "title": "CC Switcher: Switch Account"
+      },
+      {
+        "command": "cc-switcher.addAccount",
+        "title": "CC Switcher: Add Current Account"
+      },
+      {
+        "command": "cc-switcher.removeAccount",
+        "title": "CC Switcher: Remove Account"
+      },
+      {
+        "command": "cc-switcher.listAccounts",
+        "title": "CC Switcher: List Accounts"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile",
+    "lint": "eslint ../src --ext ts"
+  },
+  "devDependencies": {
+    "@types/node": "^18.x",
+    "@types/vscode": "^1.80.0",
+    "@typescript-eslint/eslint-plugin": "^6.x",
+    "@typescript-eslint/parser": "^6.x",
+    "eslint": "^8.x",
+    "typescript": "^5.x"
+  }
+}

@@ -1,0 +1,14 @@
+out
+node_modules
+.vscode-test/
+*.vsix
+
+# Local settings
+.claude/settings.local.json
+
+# ====================================
+# TEMPORARY: For creating public branch
+# ====================================
+.dev/
+.claude/
+DESIGN.md
