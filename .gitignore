@@ -12,3 +12,15 @@ node_modules
 .dev/
 .claude/
 DESIGN.md
+
+# ====================================
+# PUBLIC BRANCH: Hide private development files
+# ====================================
+# Development management (private)
+.dev/
+
+# Claude Code configuration (private)
+.claude/
+
+# Design documentation (private)
+DESIGN.md
