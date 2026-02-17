@@ -22,7 +22,7 @@ A VSCode extension to switch between multiple Claude Code accounts without brows
 
 ## Architecture
 
-See DESIGN.md in the repository for detailed architecture and design decisions.
+See [DESIGN.md](DESIGN.md) for detailed architecture and design decisions.
 
 ## Development
 
