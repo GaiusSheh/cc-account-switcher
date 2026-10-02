@@ -12,6 +12,9 @@ import * as vscode from 'vscode';
 import { getLoginStatus } from './accountManager';
 
 let statusBarItem: vscode.StatusBarItem | undefined;
+let pollingInterval: ReturnType<typeof setInterval> | undefined;
+
+const POLL_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 
 /**
  * Create and initialize status bar item
@@ -36,6 +39,11 @@ export function createStatusBarItem(context: vscode.ExtensionContext): vscode.St
     // Initial update (async, but we don't need to wait)
     updateStatusBar().catch(console.error);
 
+    // Poll every 5 minutes to detect silent OAuth token rotation
+    pollingInterval = setInterval(() => {
+        updateStatusBar().catch(console.error);
+    }, POLL_INTERVAL_MS);
+
     // Show status bar
     statusBarItem.show();
 
@@ -50,7 +58,7 @@ export async function updateStatusBar(): Promise<void> {
         return;
     }
 
-    const status = await getLoginStatus();
+    const status = getLoginStatus();
 
     if (status.type === 'known') {
         statusBarItem.text = `$(account) ${status.label}`;
@@ -72,6 +80,10 @@ export function getStatusBarItem(): vscode.StatusBarItem | undefined {
  * Dispose status bar item
  */
 export function disposeStatusBar(): void {
+    if (pollingInterval) {
+        clearInterval(pollingInterval);
+        pollingInterval = undefined;
+    }
     if (statusBarItem) {
         statusBarItem.dispose();
         statusBarItem = undefined;

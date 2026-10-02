@@ -5,28 +5,40 @@ A VSCode extension to switch between multiple Claude Code accounts without brows
 ## Features
 
 - Display current Claude Code account in status bar
-- One-click switching between managed accounts
-- Auto-reload window after switch
-- Preserve all settings except authentication
+- Distinguishes "No Account" (not logged in) from "Unknown" (logged in but not registered)
+- One-click switching between managed accounts, with auto-reload after switch
+- Add a new account from inside VSCode: runs `claude auth login` for you and detects the account's email
+- Prevents registering the same account twice (matched by email)
+- Rename, remove accounts
+- Link current session to an existing account (useful after OAuth token rotation)
+- Only credentials are swapped; your Claude Code settings are never modified
 
 ## Usage
 
-1. **Add Account**: Use command `CC Switcher: Add Current Account` to add your currently logged-in account
-2. **Switch Account**: Click the status bar item showing your account email, then select target account
-3. **Remove Account**: Use command `CC Switcher: Remove Account` to remove an account from registry
+Click the account item in the status bar to open the account picker.
+
+1. **Switch Account**: Select any saved account. The window reloads to apply it
+2. **Add New Account**: Select `Add new account...`. A `Claude Login` terminal runs `claude auth login`; finish the sign-in in your browser with the new account (if the browser is already signed in to claude.ai with another account, sign out there or use a private window first). The extension then detects the account's email and asks for a label
+3. **Add Current Account**: Select `Add current account` to save the account you are already logged into
+4. **Rename Account**: Select `Rename account...`
+5. **Remove Account**: Click the trash icon next to an account in the picker (the active account can't be removed)
+6. **Link Current Session**: If the status bar shows `Unknown`, select `Link current session to account...` to bind your current credentials to an existing account
+
+Always switch accounts through this extension: it keeps each account's latest rotated token so switching back doesn't fail with 401.
+
+Troubleshooting: the `CC Account Switcher` panel in the Output view logs each step of adding an account.
 
 ## Requirements
 
 - VSCode 1.80.0 or higher
-- Claude Code extension installed and logged in
-
-## Architecture
-
-See DESIGN.md in the repository for detailed architecture and design decisions.
+- Claude Code installed and logged in
+- `claude` CLI on `PATH` (used for `Add new account...` and account detection)
 
 ## Development
 
 ```bash
+cd extension
+
 # Install dependencies
 npm install
 
@@ -37,8 +49,7 @@ npm run compile
 npm run watch
 
 # Package
-npm install -g @vscode/vsce
-vsce package
+npx @vscode/vsce package --allow-missing-repository
 ```
 
 ## License

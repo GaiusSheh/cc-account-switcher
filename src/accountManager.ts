@@ -13,8 +13,9 @@ import {
     readCredentials,
     writeCredentials,
     readClaudeConfig,
-    writeClaudeConfig,
-    isLoggedIn
+    isLoggedIn,
+    AuthStatus,
+    OAuthAccount
 } from './authFiles';
 import {
     AccountInfo,
@@ -50,8 +51,9 @@ export interface RemoveAccountResult {
 /**
  * Add current logged-in account to registry with user-provided label
  * Backs up credentials and config for later switching
+ * @param identity Result of `claude auth status`, if available; its email is stored with the account
  */
-export async function addAccount(label: string): Promise<AddAccountResult> {
+export async function addAccount(label: string, identity?: AuthStatus): Promise<AddAccountResult> {
     try {
         // Check if logged in
         if (!isLoggedIn()) {
@@ -75,26 +77,31 @@ export async function addAccount(label: string): Promise<AddAccountResult> {
         const config = readClaudeConfig();
         const oauthAccount = config.oauthAccount;
 
-        if (!oauthAccount) {
-            return {
-                success: false,
-                message: 'No oauthAccount found in Claude config.'
-            };
-        }
-
         // Get registry and assign new ID
         const registry = readRegistry();
         const newId = registry.nextId;
         const accountInfo: AccountInfo = {
             id: newId,
             label: label,
-            uuid: oauthAccount.id,
+            uuid: identity?.email && oauthAccount?.emailAddress !== identity.email
+                ? undefined // claude.json describes another account; don't record its uuid
+                : (oauthAccount?.accountUuid ?? oauthAccount?.id),
+            email: identity?.email,
             addedAt: new Date().toISOString()
         };
 
+        // The local claude.json can describe a different account than the fresh login;
+        // when the CLI reported the real identity, don't back up a mismatched oauthAccount
+        let configToSave: OAuthAccount | undefined = oauthAccount;
+        if (identity?.email && oauthAccount?.emailAddress !== identity.email) {
+            configToSave = { emailAddress: identity.email, organizationUuid: identity.orgId };
+        }
+
         // Save backups
         saveCredentialsBackup(newId, label, credentials);
-        saveConfigBackup(newId, label, oauthAccount);
+        if (configToSave) {
+            saveConfigBackup(newId, label, configToSave);
+        }
 
         // Update registry
         registry.accounts.push(accountInfo);
@@ -133,31 +140,15 @@ export async function switchAccount(targetAccountId: number): Promise<SwitchAcco
             };
         }
 
-        // Backup current account if it's logged in and managed
-        const currentLabel = await getActiveAccountLabel();
-        if (currentLabel) {
-            const currentAccount = findAccountByLabel(currentLabel);
-            if (currentAccount) {
-                try {
-                    const currentCred = readCredentials();
-                    const currentConfig = readClaudeConfig();
-                    saveCredentialsBackup(currentAccount.id, currentAccount.label, currentCred);
-                    if (currentConfig.oauthAccount) {
-                        saveConfigBackup(currentAccount.id, currentAccount.label, currentConfig.oauthAccount);
-                    }
-                } catch (error) {
-                    console.warn(`Warning: Could not backup current account: ${error}`);
-                }
-            }
-        }
+        backupActiveAccount();
 
         // Load target account backups
         const targetCred = loadCredentialsBackup(targetAccount.id, targetAccount.label);
-        const targetOAuth = loadConfigBackup(targetAccount.id, targetAccount.label);
 
         // Write target account to auth files
+        // Only credentials are swapped: .claude.json is not written (it races with running
+        // Claude Code processes, which refresh oauthAccount from the new token themselves)
         writeCredentials(targetCred);
-        writeClaudeConfig(targetOAuth);
 
         // Update active account in registry
         registry.activeAccountId = targetAccountId;
@@ -174,6 +165,82 @@ export async function switchAccount(targetAccountId: number): Promise<SwitchAcco
             message: `Failed to switch account: ${error}`
         };
     }
+}
+
+/**
+ * Save the live credentials into the active account's backup
+ * Uses activeAccountId (reliable even after token rotation), so the latest
+ * rotated refresh token is kept before the live credentials get replaced
+ */
+export function backupActiveAccount(): void {
+    const registry = readRegistry();
+    if (registry.activeAccountId === null) {
+        return;
+    }
+    const currentAccount = findAccountById(registry.activeAccountId);
+    if (!currentAccount) {
+        return;
+    }
+    try {
+        const currentCred = readCredentials();
+        const currentConfig = readClaudeConfig();
+        saveCredentialsBackup(currentAccount.id, currentAccount.label, currentCred);
+        // Right after a switch, Claude Code may not have refreshed oauthAccount yet;
+        // only save it when it matches this account's known email
+        const knownEmail = getAccountEmail(currentAccount);
+        const oauthAccount = currentConfig.oauthAccount;
+        if (oauthAccount && (!knownEmail || oauthAccount.emailAddress?.toLowerCase() === knownEmail.toLowerCase())) {
+            saveConfigBackup(currentAccount.id, currentAccount.label, oauthAccount);
+        }
+    } catch (error) {
+        console.warn(`Warning: Could not backup current account: ${error}`);
+    }
+}
+
+/**
+ * Get the refresh token of the live credentials, if any
+ * Used to detect that a login actually replaced the credentials
+ */
+export function getCurrentRefreshToken(): string | undefined {
+    try {
+        return readCredentials().claudeAiOauth?.refreshToken;
+    } catch (error) {
+        return undefined;
+    }
+}
+
+/**
+ * Mark no account as active
+ * Used when the live credentials belong to an account that isn't registered
+ */
+export function clearActiveAccount(): void {
+    const registry = readRegistry();
+    registry.activeAccountId = null;
+    writeRegistry(registry);
+}
+
+/**
+ * Get the email of a registered account
+ * Older entries have no stored email; fall back to their config backup
+ */
+export function getAccountEmail(account: AccountInfo): string | undefined {
+    if (account.email) {
+        return account.email;
+    }
+    try {
+        return loadConfigBackup(account.id, account.label).emailAddress;
+    } catch (error) {
+        return undefined;
+    }
+}
+
+/**
+ * Find a registered account by email (case-insensitive)
+ */
+export function findAccountByEmail(email: string): AccountInfo | null {
+    const target = email.toLowerCase();
+    const account = readRegistry().accounts.find(acc => getAccountEmail(acc)?.toLowerCase() === target);
+    return account || null;
 }
 
 /**
@@ -194,8 +261,7 @@ export async function removeAccount(accountId: number): Promise<RemoveAccountRes
         }
 
         // Check if it's the currently active account
-        const currentLabel = await getActiveAccountLabel();
-        if (currentLabel === account.label) {
+        if (registry.activeAccountId === accountId) {
             return {
                 success: false,
                 message: `Cannot remove currently active account: ${account.label}`
@@ -246,50 +312,6 @@ export function getActiveAccountId(): number | null {
     return registry.activeAccountId;
 }
 
-/**
- * Get the label of the currently active account by comparing credentials
- * Returns null if current account is not managed or not logged in
- */
-export async function getActiveAccountLabel(): Promise<string | null> {
-    try {
-        // Check if logged in
-        if (!isLoggedIn()) {
-            return null;
-        }
-
-        // Read current credentials
-        const currentCred = readCredentials();
-        const currentToken = currentCred.claudeAiOauth?.refreshToken;
-
-        if (!currentToken) {
-            return null;
-        }
-
-        // Get all managed accounts
-        const registry = readRegistry();
-
-        // Compare with each account's backup
-        for (const account of registry.accounts) {
-            try {
-                const backupCred = loadCredentialsBackup(account.id, account.label);
-                const backupToken = backupCred.claudeAiOauth?.refreshToken;
-
-                if (backupToken === currentToken) {
-                    return account.label;
-                }
-            } catch (error) {
-                // Backup might not exist, continue checking other accounts
-                continue;
-            }
-        }
-
-        // No match found - account is not managed
-        return null;
-
-    } catch (error) {
-        return null;
-    }
-}
 
 /**
  * Login status for the current session
@@ -305,13 +327,16 @@ export type LoginStatus =
  * - 'unknown': logged in but not registered in the switcher
  * - 'known': logged in and registered, with matching label
  */
-export async function getLoginStatus(): Promise<LoginStatus> {
+export function getLoginStatus(): LoginStatus {
     if (!isLoggedIn()) {
         return { type: 'no_account' };
     }
-    const label = await getActiveAccountLabel();
-    if (label) {
-        return { type: 'known', label };
+    const activeId = getActiveAccountId();
+    if (activeId !== null) {
+        const account = findAccountById(activeId);
+        if (account) {
+            return { type: 'known', label: account.label };
+        }
     }
     return { type: 'unknown' };
 }
@@ -377,7 +402,7 @@ export interface LinkSessionResult {
  * Overwrites the account's backup with the current credentials
  * Useful when tokens have rotated and the account shows as "Unknown"
  */
-export async function linkCurrentSession(accountId: number): Promise<LinkSessionResult> {
+export async function linkCurrentSession(accountId: number, email?: string): Promise<LinkSessionResult> {
     try {
         if (!isLoggedIn()) {
             return { success: false, message: 'Not logged into Claude Code. Please login first.' };
@@ -401,9 +426,15 @@ export async function linkCurrentSession(accountId: number): Promise<LinkSession
         saveCredentialsBackup(account.id, account.label, credentials);
         saveConfigBackup(account.id, account.label, oauthAccount);
 
-        // Update active account in registry
+        // Update active account in registry (and remember the verified email)
         const registry = readRegistry();
         registry.activeAccountId = accountId;
+        if (email) {
+            const entry = registry.accounts.find(acc => acc.id === accountId);
+            if (entry) {
+                entry.email = email;
+            }
+        }
         writeRegistry(registry);
 
         return { success: true, message: `Linked current session to account: ${account.label}` };

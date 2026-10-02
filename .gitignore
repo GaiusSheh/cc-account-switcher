@@ -22,5 +22,8 @@ DESIGN.md
 # Claude Code configuration (private)
 .claude/
 
+# Agent project memory / conversation logs (private)
+.agents/
+
 # Design documentation (private)
 DESIGN.md

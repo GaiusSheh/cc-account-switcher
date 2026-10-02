@@ -16,6 +16,7 @@ export interface AccountInfo {
     id: number;
     label: string;  // User-provided label (e.g., "proton", "gmail", "work")
     uuid?: string;
+    email?: string; // From `claude auth status`; older entries fall back to config backup
     addedAt: string;
 }
 
